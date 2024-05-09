@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Check if script is run as root
+if [ "$(id -u)" -ne 0 ]; then
+    echo "You must be root or run with sudo."
+    exit 1
+fi
+
+# Disable cdrom entry in sources.list
+if grep -qa "cdrom" /etc/apt/sources.list; then
+    sed -i '1 s/^/#/' /etc/apt/sources.list
+fi
+
+# Install required packages
+apt-get update
+apt-get install -y zram-tools snapper inotify-tools git make snapper-gui
+
+# Configure zram
+sed -i 's/^#ALGO=lz4/ALGO=lz4/g' /etc/default/zramswap
+sed -i 's/^#PERCENT=50/PERCENT=20/g' /etc/default/zramswap
+
+# Define snapshot subvolumes
+SNAPSHOT_SUBVOL=( "/.snapshots" "/home/.snapshots" "/opt/.snapshots" \
+    "/usr/local/.snapshots" "/srv/.snapshots" \
+    "/var/lib/libvirt/images/.snapshots" \
+    "/var/lib/docker/.snapshots" \
+    "/var/lib/containers/.snapshots" \
+    "/var/www/.snapshots" )
+
+# Unmount subvolumes and remove contents
+for DIR in "${SNAPSHOT_SUBVOL[@]}"; do
+    if mountpoint -q "$DIR"; then
+        umount -v "$DIR"
+    fi
+    rm -rf "$DIR"
+done
+
+# Create snapper configuration
+python3 /home/btrfs_conf/create_snapper_config.py
+
+# Delete existing subvolumes and recreate directories
+for DIR in "${SNAPSHOT_SUBVOL[@]}"; do
+    btrfs subvol delete "$DIR" || true
+    mkdir -pv "$DIR"
+done
+
+# Mount filesystems
+mount -av
+
+# Disable snapper-boot timer
+systemctl disable --now snapper-boot.timer
+
+# Configure snapper
+python3 /home/btrfs_conf/setup_snapper_config.py
+
+# Clone and install grub-btrfs
+git clone https://github.com/Antynea/grub-btrfs /home/btrfs_conf/grub-btrfs
+make install --directory /home/btrfs_conf/grub-btrfs
+
+# Update GRUB
+update-grub2
+
+# Enable and start grub-btrfs daemon
+systemctl enable --now grub-btrfsd
+
+echo "Please run: ./fix_home.sh"

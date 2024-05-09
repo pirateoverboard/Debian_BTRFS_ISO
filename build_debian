@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+
+set -e
+
+# Display usage information
+usage() { 
+	printf "%s\n" "Usage: sudo $0 [n[net]] | [f[full]]" \
+		"Use [n[net]] for a net-install" \
+		"Use [f[full]] for a DVD install" \
+		&& grep " .)\ #" "$0"; exit 0; 
+}
+
+# Check if no arguments are provided, display usage
+[ $# -eq 0 ] && usage
+
+# Check for required installed programs
+progrms=(
+    xorriso
+    aria2c
+    curl
+    gpg
+)
+
+for var in "${progrms[@]}"; do
+    if ! command -v "$var" &> /dev/null; then
+        echo "$var not found. Please install"
+        exit 1
+    fi
+done
+
+# Function to download and verify ISO
+download_and_verify_iso() {
+    cd debian
+    # Download newest iso unless local copy exists
+    for file in $(curl -s  "$http_iso_dir/" |
+        grep href |
+        sed 's/.*href="//' |
+        sed 's/".*//' |
+        grep -E 'debian-[0-9]'); do
+            aria2c -c  --auto-file-renaming=false  --allow-overwrite=true \
+                "$http_iso_dir/$file"
+    done
+
+    # Download SHA512SUMS and SHA512SUMS.sign
+    curl --output SHA512SUMS "$http_iso_dir/SHA512SUMS"
+    curl --output SHA512SUMS.sign "$http_iso_dir/SHA512SUMS.sign"
+
+    # Check signatures
+    gpg --keyserver keyring.debian.org --recv-key 0xDA87E80D6294BE9B
+    if gpg --verify SHA512SUMS.sign SHA512SUMS; then
+        echo "Debian signature matches"
+    else
+        echo "Signature mismatch. Quitting..."
+        echo "Please remove $debian_iso SHA512SUMS.sign SHA512SUMS"
+        exit 1
+    fi
+
+    # Check sha512sum
+    if echo "$debian_iso" | sha512sum -c --ignore-missing <(cat SHA512SUMS); then
+        echo "SHA512SUM matches"
+    else
+        echo "SHA512SUM does not match. quitting"
+        echo "Please remove $debian_iso and SHA512SUMS"
+        exit 1
+    fi
+    cd -
+}
+
+# Function to build Debian ISO
+build_debian_iso() {
+    xorriso -osirrox on -indev "./debian/$debian_iso" -extract / ./debian/isofiles
+
+    # Make .iso writeable and create scrips folder for cdrom dir
+    chmod +w -R ./debian/isofiles/
+    mkdir -p ./debian/isofiles/scripts
+
+    # Add scripts to .iso
+    if [[ -d scripts ]]; then
+        cp -r scripts/* ./debian/isofiles/scripts/
+    else
+        echo "No script detected inside folder ./scripts"
+        exit 1
+    fi
+
+    # Recalculate .iso md5sum
+    find ./debian/isofiles/ -follow -type f ! -name md5sum.txt -print0 | \
+        xargs -0 md5sum > ./debian/isofiles/md5sum.txt.
+
+    chmod -w -R ./debian/isofiles/
+
+    new_files=./debian/isofiles
+    new_iso=./"debian-$(echo "$debian_iso" | \
+        cut -d- -f2)-amd64-$(echo "$debian_iso" | \
+        cut -d- -f4 | cut -d. -f1)-btrfs-modified.iso"
+    mbr_template=./debian/isohdpfx.bin
+
+    # Extract MBR template file to disk
+    dd if="./debian/$debian_iso" bs=1 count=432 of="$mbr_template"
+
+    # Create the new ISO image
+    xorriso -as mkisofs \
+       -r -V 'Debian modified iso' \
+       -o "$new_iso" \
+       -J -J -joliet-long -cache-inodes \
+       -isohybrid-mbr "$mbr_template" \
+       -b isolinux/isolinux.bin \
+       -c isolinux/boot.cat \
+       -boot-load-size 4 -boot-info-table -no-emul-boot \
+       -eltorito-alt-boot \
+       -e boot/grub/efi.img \
+       -no-emul-boot -isohybrid-gpt-basdat -isohybrid-apm-hfsplus \
+       "$new_files"
+}
+
+# Main script logic
+case $1 in
+    n|net)
+        http_iso_dir="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
+        # Use a for loop instead of ls and grep
+        debian_iso=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-netinst.iso' -printf '%P\n' | sort -r | head -n1 | cut -d/ -f3)
+        download_and_verify_iso
+        build_debian_iso
+        ;;
+    f|full)
+        http_iso_dir="https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd"
+        debian_iso=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-DVD-*.iso' -printf '%P\n' | sort -r | head -n1 | cut -d/ -f3)
+        download_and_verify_iso
+        build_debian_iso
+        ;;
+    h|*)
+        usage 
+        ;;
+esac
