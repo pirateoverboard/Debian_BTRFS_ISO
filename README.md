@@ -1,4 +1,4 @@
-# Debian_BTRFS_ISO README is a work in progress
+# Debian_BTRFS_ISO
 Automatic building of a Debian ISO with BTRFS and snapper support
 
 # Clone the repo
@@ -7,43 +7,51 @@ Automatic building of a Debian ISO with BTRFS and snapper support
 `cd Debian_BTRFS_ISO`
 
 # Build the ISO
+For a debian net install, use:
+
 `sudo ./build_debian net`
 
+For a debian DVD full install, use:
+
+`sudo ./build_debian full`
+
+# Info:
+the build_debian command with build a debian ISO: debian-<version>-amd64-<DVD/netinst>-btrfs-modified.iso
+
 # Make bootable USB and boot USB
-### Select: Advanced Options
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/1.png)
-### Select Expert Install
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/2.png)
-# Keep pressing <Enter> key. When you get to partition disks. Then choose Manual
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/3.png)
-### Create a new patition table and choose gpt
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/4.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/5.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/6.png)
-### Create an EFI system partition
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/7.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/8.png)
-### set to 512MB
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/9.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/10.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/11.png)
-### Create /boot partition and set to 2GB 
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/12.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/13.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/14.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/15.png)
-### set to mount point /boot
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/16.png)
-### Craete encrypted volume
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/17.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/18.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/19.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/20.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/21.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/22.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/23.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/24.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/25.png)
-# Choose filesystem btrfs and mount point as /
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/26.png)
-![image](https://github.com/pirateoverboard/Debian_BTRFS_ISO/blob/main/images/27.png)
+
+# QUICK GUIDE
+After booting USB, choose Advanced, then Expert install
+
+Configure everything until you get to partitioning
+
+When you get to Partition, choose Manual
+- [ ] Configure EFI partition
+- [ ] Configure /boot partition
+- [ ] Configure Encypted Volumes
+- [ ] Change Encryped Volume from ext4 to btrfs
+- [ ] Change Encryped Volume mount point to /
+- [ ] Commit changes
+- [ ] DON'T INSTALL BASE. Instead choose execute a shell
+- [ ] run `./cdrom/scripts/build_btrfs_subvols`
+- [ ] exit
+
+Install base and configure remaining options
+
+### After first boot, run these commands:
+`cd /home`
+
+`sudo ./btrfs_conf/install_snapper_grub-btrfs`
+
+`./btrfs_conf/fix_home.sh`
+
+Optionally, to install btrfs-assistant
+
+`sudo ./btrfs_conf/extra_install_btrfs-assistant.sh`
+
+Finally, if no errors:
+
+`sudo rm -rf /btrfs_conf`
+
+# FULL GUIDE COMING SOON
+
