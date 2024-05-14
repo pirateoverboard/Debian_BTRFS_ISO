@@ -68,5 +68,7 @@ echo 'DPkg::Post-Invoke { "/usr/local/sbin/dpkg-pre-post-snapper.sh post"; };' |
 # Create snapper snapshots
 sudo snapper -c home create --description "default fresh install"
 sudo snapper -c root create --description "default fresh install"
-
+echo
+echo
+echo "If you want to install btrfs-assistant you can run: sudo ./extra_install_btrfs-assistant.sh"
 echo "If no errors, it's safe to remove: sudo -rf /home/btrfs_conf"

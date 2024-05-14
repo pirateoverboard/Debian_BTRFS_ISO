@@ -15,7 +15,7 @@ fi
 
 # Install required packages
 apt-get update
-apt-get install -y zram-tools snapper inotify-tools git make snapper-gui
+apt-get install -y zram-tools snapper inotify-tools git make
 
 # Configure zram
 sed -i 's/^#ALGO=lz4/ALGO=lz4/g' /etc/default/zramswap
@@ -64,5 +64,6 @@ update-grub2
 
 # Enable and start grub-btrfs daemon
 systemctl enable --now grub-btrfsd
-
+echo
+echo
 echo "Please run: ./fix_home.sh"
