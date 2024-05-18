@@ -11,80 +11,118 @@ BOOT_DEVICE=$(df | awk '/\/target\/boot$/{print $1;exit}')
 VOL_GROUP=$(df | awk '/\/dev\/mapper/{print $1;exit}')
 GET_UUID=$(blkid | awk '/\/dev\/mapper/{print $2;exit}' | sed 's/"//g')
 
+SETUP_ROOT_FILESYSTEM() {
+	for DEVICE in /target/boot/efi /target/boot /target;do
+		if grep -qs "${DEVICE}" /proc/mounts; then
+			umount -v "${DEVICE}"
+		fi
+	done
 
-for DEVICE in /target/boot/efi /target/boot /target;do
-	if grep -qs "${DEVICE}" /proc/mounts; then
-		umount -v "${DEVICE}"
+	# Mount btrfs root filesystem.
+	mount -v "${VOL_GROUP}" /mnt
+
+	# Rename root filesystem.
+	if [ -d /mnt/@rootfs ]; then
+		mv -v /mnt/@rootfs /mnt/@
+	else
+		echo "Error: file system not BTRFS. Please restart install."
+		exit 2
 	fi
-done
 
-# Mount btrfs root filesystem.
-mount -v "${VOL_GROUP}" /mnt
+	MOUNT_OPTIONS="noatime,space_cache=v2,compress=zstd:1,ssd,discard=async"
+	mount -v -t btrfs -o "${MOUNT_OPTIONS},subvol=@" "${VOL_GROUP}" /target
 
-# Rename root filesystem.
-if [ -d /mnt/@rootfs ]; then
-	mv -v /mnt/@rootfs /mnt/@
-else
-	echo "Error: file system not BTRFS. Please restart install."
-	exit 2
-fi
+	FSTAB_MAX_LEN="34"
 
-MOUNT_OPTIONS="noatime,space_cache=v2,compress=zstd:1,ssd,discard=async"
-mount -v -t btrfs -o ${MOUNT_OPTIONS},subvol=@ "${VOL_GROUP}" /target
-
-FSTAB_MAX_LEN="34"
-
-sed -i '/@rootfs/d' /target/etc/fstab
-printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
-		"${GET_UUID}" "/" "btrfs" \
-		"${MOUNT_OPTIONS},subvol=@" "0 0" \
-		>> /target/etc/fstab
-
-# Create and configure subvolumes
-for BTRFS_DIRS in .snapshots home root var/log var/tmp \
-				srv opt var/lib/libvirt/images \
-            	usr/local var/spool tmp var/lib/docker \
-    			var/lib/gdm3 var/lib/AccountsService \
-    			var/cache var/crash var/lib/containers \
-    			var/www var/lib/sddm; do
-    BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed -r 's|/|@|g')
-	btrfs subvolume create /mnt/@"${BTRFS_SUBVOLS}"
-	mkdir -p -v /target/"${BTRFS_DIRS}"
-	mount -v -o ${MOUNT_OPTIONS},subvol=@"${BTRFS_SUBVOLS}" "${VOL_GROUP}" \
-				/target/"${BTRFS_DIRS}"
+	sed -i '/@rootfs/d' /target/etc/fstab
 	printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
-		"${GET_UUID}" "/${BTRFS_DIRS}" "btrfs" \
-		"${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "0 0" \
-		>> /target/etc/fstab
-done
+			"${GET_UUID}" "/" "btrfs" \
+			"${MOUNT_OPTIONS},subvol=@" "0 0" \
+			>> /target/etc/fstab
+}
 
-# .snapshot subvols need a mount point before they can be mounted
-for BTRFS_DIRS in home/.snapshots srv/.snapshots \
-				usr/local/.snapshots var/lib/libvirt/images/.snapshots \
-				var/lib/containers/.snapshots opt/.snapshots \
-				var/lib/docker/.snapshots var/www/.snapshots; do
-	BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed -r 's|/|@|g')
-	btrfs subvolume create /mnt/@"${BTRFS_SUBVOLS}"
-	mkdir -p -v /target/"${BTRFS_DIRS}"
-	mount -v -o ${MOUNT_OPTIONS},subvol=@"${BTRFS_SUBVOLS}" "${VOL_GROUP}" \
-				/target/"${BTRFS_DIRS}"
-	printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
-		"${GET_UUID}" "/${BTRFS_DIRS}" "btrfs" \
-		"${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "0 0" \
-		>> /target/etc/fstab
-done
+SETUP_SUBVOLUMES() {
+	# Create and configure subvolumes
+	while IFS= read -r BTRFS_DIRS
+	do
+	    BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed -r 's|/|@|g')
+		btrfs subvolume create "/mnt/@${BTRFS_SUBVOLS}"
+		mkdir -p -v "/target/${BTRFS_DIRS}"
+		mount -v -o "${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "${VOL_GROUP}" \
+					"/target/${BTRFS_DIRS}"
+		printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
+			"${GET_UUID}" "/${BTRFS_DIRS}" "btrfs" \
+			"${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "0 0" \
+			>> /target/etc/fstab
+	done <<- END
+		.snapshots
+		home
+		root
+		var/log
+		var/tmp
+		srv
+		opt
+		var/lib/libvirt/images
+		usr/local
+		var/spool
+		tmp
+		var/lib/docker
+		var/lib/gdm3
+		var/lib/AccountsService
+		var/cache
+		var/crash
+		var/lib/containers
+		var/www
+		var/lib/sddm
+	END
 
+}
 
-# Mount boot
-mount -v "${BOOT_DEVICE}" /target/boot
+SETUP_SNAPSHOT_SUBVOLS() {
+	# .snapshot subvols need a mount point before they can be mounted
+	while IFS= read -r BTRFS_DIRS
+	do
+		BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed -r 's|/|@|g')
+		btrfs subvolume create "/mnt/@${BTRFS_SUBVOLS}"
+		mkdir -p -v "/target/${BTRFS_DIRS}"
+		mount -v -o "${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "${VOL_GROUP}" \
+					"/target/${BTRFS_DIRS}"
+		printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
+			"${GET_UUID}" "/${BTRFS_DIRS}" "btrfs" \
+			"${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "0 0" \
+			>> /target/etc/fstab
+	done <<- END
+		home/.snapshots
+		srv/.snapshots
+		usr/local/.snapshots
+		var/lib/libvirt/images/.snapshots
+		var/lib/containers/.snapshots
+		var/lib/docker/.snapshots
+		opt/.snapshots
+		var/www/.snapshots
+	END
+}
 
-# Mount efi if it exists
-if [ -d /sys/firmware/efi ]; then
-	mount -v "${EFI_DEVICE}" /target/boot/efi
-fi
+FINISH_INSTALL(){
+	# Mount boot
+	mount -v "${BOOT_DEVICE}" /target/boot
 
-mkdir -p -v /target/home/btrfs_conf
-cp -r /cdrom/scripts/* /target/home/btrfs_conf
-umount -v /mnt
+	# Mount efi if it exists
+	if [ -d /sys/firmware/efi ]; then
+		mount -v "${EFI_DEVICE}" /target/boot/efi
+	fi
+
+	mkdir -p -v /target/home/btrfs_conf
+	cp -r -v /cdrom/scripts/* /target/home/btrfs_conf
+	umount -v /mnt
+}
+
+SETUP_ROOT_FILESYSTEM
+SETUP_SUBVOLUMES
+SETUP_SNAPSHOT_SUBVOLS
+FINISH_INSTALL
+
+echo "btrfs subvolumes setup correctly"
+echo "script output and errors written to log.txt"
 echo "copied scripts to /home/btrfs_conf"
 echo "after first boot run: sudo ./install_snapper_grub-btrfs"
