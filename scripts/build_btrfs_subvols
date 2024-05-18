@@ -10,6 +10,7 @@ fi
 BOOT_DEVICE=$(df | awk '/\/target\/boot$/{print $1;exit}')
 VOL_GROUP=$(df | awk '/\/dev\/mapper/{print $1;exit}')
 GET_UUID=$(blkid | awk '/\/dev\/mapper/{print $2;exit}' | sed 's/"//g')
+FSTAB_MAX_LEN="34"
 
 SETUP_ROOT_FILESYSTEM() {
 	for DEVICE in /target/boot/efi /target/boot /target;do
@@ -32,7 +33,6 @@ SETUP_ROOT_FILESYSTEM() {
 	MOUNT_OPTIONS="noatime,space_cache=v2,compress=zstd:1,ssd,discard=async"
 	mount -v -t btrfs -o "${MOUNT_OPTIONS},subvol=@" "${VOL_GROUP}" /target
 
-	FSTAB_MAX_LEN="34"
 
 	sed -i '/@rootfs/d' /target/etc/fstab
 	printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
