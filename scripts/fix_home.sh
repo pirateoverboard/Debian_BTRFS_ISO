@@ -37,6 +37,9 @@ DIR_NAMES=(
 )
 
 for DIR_NAME in "${DIR_NAMES[@]}"; do
+    if [[ -d "${USER_HOME}/${DIR_NAME}" ]]; then
+        sudo mv -v "${USER_HOME}/${DIR_NAME}" "${USER_HOME}/${DIR_NAME}-backup"
+    fi
     BTRFS_SUBVOL="$(echo "$USER_HOME/$DIR_NAME" | tr / @)"
     sudo btrfs subvolume create "/mnt/${BTRFS_SUBVOL}"
     sudo mkdir -p -v "${USER_HOME}/${DIR_NAME}"
@@ -45,6 +48,10 @@ for DIR_NAME in "${DIR_NAMES[@]}"; do
         "${GET_UUID}" "${USER_HOME}/${DIR_NAME}" "btrfs" \
         "${MOUNT_OPTIONS},subvol=${BTRFS_SUBVOL}" "0 0" \
         | sudo tee -a /etc/fstab > /dev/null
+    if [[ -d "${USER_HOME}/${DIR_NAME}-backup" ]]; then
+        sudo cp -ar "${USER_HOME}/${DIR_NAME}-backup/." "${USER_HOME}/${DIR_NAME}"
+        sudo rm -rf "${USER_HOME}/${DIR_NAME}-backup"
+    fi 
 done
 
 # Reload systemd to pick up fstab changes
