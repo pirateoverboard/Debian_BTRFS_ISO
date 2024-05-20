@@ -80,7 +80,12 @@ BUILD_DEBIAN_ISO() {
 
     # Make .iso writeable and create scrips folder for cdrom dir
     chmod +w -R ./debian/isofiles/
-    mkdir -p ./debian/isofiles/scripts
+
+    if [[ -d ./debian/isofiles/scripts ]]; then
+        rm -r ./debian/isofiles/scripts/*
+    else
+        mkdir -p ./debian/isofiles/scripts
+    fi
 
     # Add scripts to .iso
     if [[ -d scripts ]]; then
