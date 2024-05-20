@@ -6,6 +6,9 @@ Automatic building of a Debian ISO with BTRFS and snapper support
 
 `cd Debian_BTRFS_ISO`
 
+# Install dependencies
+`sudo apt install xorriso aria2c curl gpg`
+
 # Build the ISO
 For a debian net install, use:
 
