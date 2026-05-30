@@ -130,14 +130,14 @@ case $1 in
     n|net)
         HTTP_ISO_DIR="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd" 
         DOWNLOAD_ISO
-        DEBIAN_ISO=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-netinst.iso' -printf '%P\n' | sort -r | head -n1)
+        DEBIAN_ISO=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-netinst.iso' -printf '%P\n' | sort -V -r | head -n1)
         VERIFY_ISO
         BUILD_DEBIAN_ISO
         ;;
     f|full)
         HTTP_ISO_DIR="https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd"
         DOWNLOAD_ISO
-        DEBIAN_ISO=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-DVD-*.iso' -printf '%P\n' | sort -r | head -n1)
+        DEBIAN_ISO=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-DVD-*.iso' -printf '%P\n' | sort -V -r | head -n1)
         VERIFY_ISO
         BUILD_DEBIAN_ISO
         ;;
