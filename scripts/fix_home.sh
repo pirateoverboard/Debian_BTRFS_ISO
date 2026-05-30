@@ -78,4 +78,4 @@ sudo snapper -c root create --description "default fresh install"
 echo
 echo
 echo "If you want to install btrfs-assistant you can run: sudo ./extra_install_btrfs-assistant.sh"
-echo "If no errors, it's safe to remove: sudo -rf /home/btrfs_conf"
+echo "If no errors, it's safe to remove: sudo rm -rf /home/btrfs_conf"
