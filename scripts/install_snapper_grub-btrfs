@@ -60,7 +60,7 @@ git clone https://github.com/Antynea/grub-btrfs /home/btrfs_conf/grub-btrfs
 make install --directory /home/btrfs_conf/grub-btrfs
 
 # Update GRUB
-update-grub2
+update-grub
 
 # Enable and start grub-btrfs daemon
 systemctl enable --now grub-btrfsd
