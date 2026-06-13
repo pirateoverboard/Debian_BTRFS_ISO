@@ -11,6 +11,11 @@ BOOT_DEVICE=$(df | awk '/\/target\/boot$/{print $1;exit}')
 VOL_GROUP=$(df | awk '/\/dev\/mapper/{print $1;exit}')
 GET_UUID=$(blkid | awk '/\/dev\/mapper/{print $2;exit}' | sed 's/"//g')
 FSTAB_MAX_LEN="34"
+SCRIPT_SOURCE="/cdrom/scripts"
+
+if [ -d /usr/lib/debian-btrfs-iso ]; then
+	SCRIPT_SOURCE="/usr/lib/debian-btrfs-iso"
+fi
 
 SETUP_ROOT_FILESYSTEM() {
 	for DEVICE in /target/boot/efi /target/boot /target;do
@@ -113,7 +118,7 @@ FINISH_INSTALL(){
 	fi
 
 	mkdir -p -v /target/home/btrfs_conf
-	cp -r -v /cdrom/scripts/* /target/home/btrfs_conf
+	cp -r -v "${SCRIPT_SOURCE}/"* /target/home/btrfs_conf
 	umount -v /mnt
 }
 

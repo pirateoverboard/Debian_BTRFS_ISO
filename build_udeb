@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PACKAGE="debian-btrfs-iso-udeb"
+ARCHITECTURE="all"
+CONTROL_TEMPLATE="udeb/control"
+OUTPUT_DIR="dist"
+
+PROGRAMS=(
+    dpkg-deb
+    install
+    awk
+)
+
+for PROGRAM in "${PROGRAMS[@]}"; do
+    if ! command -v "$PROGRAM" >/dev/null 2>&1; then
+        echo "$PROGRAM not found. Please install it."
+        exit 1
+    fi
+done
+
+if [[ ! -f "$CONTROL_TEMPLATE" ]]; then
+    echo "Cannot find $CONTROL_TEMPLATE"
+    exit 1
+fi
+
+VERSION="$(awk '/^Version: / { print $2; exit }' "$CONTROL_TEMPLATE")"
+if [[ -z "$VERSION" ]]; then
+    echo "Cannot determine package version from $CONTROL_TEMPLATE"
+    exit 1
+fi
+
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/${PACKAGE}.XXXXXX")"
+PACKAGE_ROOT="${BUILD_DIR}/${PACKAGE}"
+trap 'rm -rf "$BUILD_DIR"' EXIT
+
+mkdir -p \
+    "$PACKAGE_ROOT/DEBIAN" \
+    "$PACKAGE_ROOT/usr/lib/partman/finish.d" \
+    "$PACKAGE_ROOT/usr/lib/debian-btrfs-iso" \
+    "$OUTPUT_DIR"
+
+install -m 0644 "$CONTROL_TEMPLATE" "$PACKAGE_ROOT/DEBIAN/control"
+install -m 0755 scripts/build_btrfs_subvols \
+    "$PACKAGE_ROOT/usr/lib/partman/finish.d/99btrfs-subvols"
+
+for SCRIPT in scripts/*; do
+    [[ -f "$SCRIPT" ]] || continue
+    case "$SCRIPT" in
+        scripts/preseed.cfg)
+            install -m 0644 "$SCRIPT" "$PACKAGE_ROOT/usr/lib/debian-btrfs-iso/"
+            ;;
+        *.py|*.sh|scripts/install_snapper_grub-btrfs|scripts/build_btrfs_subvols|scripts/install_btrfs_udeb)
+            install -m 0755 "$SCRIPT" "$PACKAGE_ROOT/usr/lib/debian-btrfs-iso/"
+            ;;
+        *)
+            install -m 0644 "$SCRIPT" "$PACKAGE_ROOT/usr/lib/debian-btrfs-iso/"
+            ;;
+    esac
+done
+
+UDEB="${OUTPUT_DIR}/${PACKAGE}_${VERSION}_${ARCHITECTURE}.udeb"
+dpkg-deb --root-owner-group --build "$PACKAGE_ROOT" "$UDEB"
+
+echo "Created udeb: $UDEB"

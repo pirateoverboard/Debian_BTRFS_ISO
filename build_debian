@@ -1,147 +1,189 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-set -e
-
-# Display USAGE information
-USAGE() { 
-	printf "%s\n" "Usage: sudo $0 [n[net]] | [f[full]]" \
-		"Use [n[net]] for a net-install" \
-		"Use [f[full]] for a DVD install" \
-		&& grep " .)\ #" "$0"; exit 0; 
+USAGE() {
+    printf "%s\n" \
+        "Usage: sudo $0 [n|net] | [f|full]" \
+        "Use [n|net] for a net-install ISO" \
+        "Use [f|full] for a DVD ISO"
+    exit 0
 }
 
-# Check if no arguments are provided, display usage
 [ $# -eq 0 ] && USAGE
 
-# Check for required installed programs
 PROGRAMS=(
     xorriso
     aria2c
     curl
     gpg
+    cpio
+    gzip
+    dpkg-deb
+    realpath
+    sha512sum
+    md5sum
 )
 
 for PROGRAM in "${PROGRAMS[@]}"; do
-    if ! command -v "$PROGRAM" &> /dev/null; then
-        echo "$PROGRAM not found. Please install"
+    if ! command -v "$PROGRAM" >/dev/null 2>&1; then
+        echo "$PROGRAM not found. Please install it."
         exit 1
     fi
 done
 
-# Function to download and verify ISO
 DOWNLOAD_ISO() {
+    mkdir -p ./debian
 
-    [[ -d ./debian ]] || mkdir -p ./debian
-
-    # Download newest iso unless local copy exists
-    for FILE in $(curl -s  "$HTTP_ISO_DIR/" |
+    for FILE in $(curl -s "$HTTP_ISO_DIR/" |
         grep href |
         sed 's/.*href="//' |
         sed 's/".*//' |
         grep -E 'debian-[0-9]'); do
-            aria2c -c  --auto-file-renaming=false  --allow-overwrite=true \
-                --dir=./debian "$HTTP_ISO_DIR/$FILE"
+
+        aria2c -c \
+            --auto-file-renaming=false \
+            --allow-overwrite=true \
+            --dir=./debian \
+            "$HTTP_ISO_DIR/$FILE"
     done
 
-    # Since SHA512SUMS file name never changes, always download new
     curl --output ./debian/SHA512SUMS "$HTTP_ISO_DIR/SHA512SUMS"
     curl --output ./debian/SHA512SUMS.sign "$HTTP_ISO_DIR/SHA512SUMS.sign"
-
 }
 
 VERIFY_ISO() {
-
-
-    # Check signatures
     gpg --keyserver keyring.debian.org --recv-key 0xDA87E80D6294BE9B
-    if gpg --verify ./debian/SHA512SUMS.sign ./debian/SHA512SUMS; then
-        echo "Debian signature matches"
-    else
-        echo "Signature mismatch. Quitting..."
-        echo "Please remove $DEBIAN_ISO SHA512SUMS.sign SHA512SUMS from debian dir"
-        exit 1
-    fi
 
-    # Check sha512sum
-    if echo "$DEBIAN_ISO" | sha512sum -c --ignore-missing \
-        <(sed 's|^\(.*\) \(debian-.*\)|\1 \./debian/\2|' ./debian/SHA512SUMS); then
-        echo "SHA512SUM matches"
-    else
-        echo "SHA512SUM does not match. quitting"
-        echo "Please remove $DEBIAN_ISO and SHA512SUMS from debian dir"
-        exit 1
-    fi
+    gpg --verify ./debian/SHA512SUMS.sign ./debian/SHA512SUMS
 
+    echo "$DEBIAN_ISO" | sha512sum -c --ignore-missing \
+        <(sed 's|^\(.*\) \(debian-.*\)|\1 \./debian/\2|' ./debian/SHA512SUMS)
+
+    echo "ISO verified"
 }
 
-# Function to build Debian ISO
-BUILD_DEBIAN_ISO() {
-    xorriso -osirrox on -indev "./debian/$DEBIAN_ISO" -extract / ./debian/isofiles
+EMBED_PRESEED_IN_INITRD() {
+    local INITRD="./debian/isofiles/install.amd/initrd.gz"
+    local PRESEED="./scripts/preseed.cfg"
+    local WORKDIR="./debian/initrd-work"
+    local NEW_INITRD="./debian/initrd.gz.new"
 
-    # Make .iso writeable and create scrips folder for cdrom dir
-    chmod +w -R ./debian/isofiles/
+    [[ -f "$PRESEED" ]] || { echo "Cannot find $PRESEED"; exit 1; }
 
-    if [[ -d ./debian/isofiles/scripts ]]; then
-        rm -r ./debian/isofiles/scripts/*
-    else
-        mkdir -p ./debian/isofiles/scripts
-    fi
-
-    # Add scripts to .iso
-    if [[ -d scripts ]]; then
-        cp -r scripts/* ./debian/isofiles/scripts/
-    else
-        echo "No script detected inside folder ./scripts"
+    if [[ ! -f "$INITRD" ]]; then
+        echo "Cannot find $INITRD"
+        find ./debian/isofiles -name initrd.gz -print
         exit 1
     fi
 
-    # Recalculate .iso md5sum
-    find ./debian/isofiles/ -follow -type f ! -name md5sum.txt -print0 | \
-        xargs -0 md5sum > ./debian/isofiles/md5sum.txt.
+    echo "Embedding preseed.cfg into initrd..."
+
+    rm -rf "$WORKDIR" "$NEW_INITRD"
+    mkdir -p "$WORKDIR"
+
+    local INITRD_ABS PRESEED_ABS NEW_INITRD_ABS
+    INITRD_ABS="$(realpath "$INITRD")"
+    PRESEED_ABS="$(realpath "$PRESEED")"
+    NEW_INITRD_ABS="$(realpath -m "$NEW_INITRD")"
+
+    (
+        cd "$WORKDIR"
+        gzip -dc "$INITRD_ABS" | cpio -id --quiet
+        cp "$PRESEED_ABS" ./preseed.cfg
+        find . -print0 | cpio --null -H newc -o --quiet | gzip -9 > "$NEW_INITRD_ABS"
+    )
+
+    mv "$NEW_INITRD" "$INITRD"
+    rm -rf "$WORKDIR"
+
+    echo "Embedded preseed.cfg into $INITRD"
+}
+
+BUILD_DEBIAN_ISO() {
+    rm -rf ./debian/isofiles
+
+    echo "Extracting ISO..."
+    xorriso -osirrox on \
+        -indev "./debian/$DEBIAN_ISO" \
+        -extract / ./debian/isofiles
+
+    chmod +w -R ./debian/isofiles/
+
+    mkdir -p ./debian/isofiles/scripts
+    rm -rf ./debian/isofiles/scripts/*
+
+    [[ -d scripts ]] || { echo "No ./scripts directory found"; exit 1; }
+    [[ -f scripts/preseed.cfg ]] || { echo "No scripts/preseed.cfg found"; exit 1; }
+
+    cp -r scripts/* ./debian/isofiles/scripts/
+    echo "Copied scripts to ISO"
+
+    cp scripts/preseed.cfg ./debian/isofiles/preseed.cfg
+    echo "Copied preseed.cfg to ISO root"
+
+    ./build_udeb
+    mkdir -p ./debian/isofiles/udeb
+    cp -v dist/debian-btrfs-iso-udeb_*.udeb ./debian/isofiles/udeb/
+    echo "Copied udeb to ISO"
+
+    EMBED_PRESEED_IN_INITRD
+
+    echo "Recalculating md5sum.txt..."
+    (
+        cd ./debian/isofiles
+        rm -f md5sum.txt
+        find . -type f ! -name md5sum.txt -print0 |
+            xargs -0 md5sum > md5sum.txt
+    )
 
     chmod -w -R ./debian/isofiles/
 
-    NEW_FILES=./debian/isofiles
-    NEW_ISO=./"debian-$(echo "$DEBIAN_ISO" | \
-        cut -d- -f2)-amd64-$(echo "$DEBIAN_ISO" | \
-        cut -d- -f4 | cut -d. -f1)-btrfs-modified.iso"
-    MBR_TEMPLATE=./debian/isohdpfx.bin
+    local NEW_FILES="./debian/isofiles"
+    local NEW_ISO="./debian-$(echo "$DEBIAN_ISO" | cut -d- -f2)-amd64-$(echo "$DEBIAN_ISO" | cut -d- -f4 | cut -d. -f1)-btrfs-modified.iso"
+    local MBR_TEMPLATE="./debian/isohdpfx.bin"
 
-    # Extract MBR template file to disk
-    dd if="./debian/$DEBIAN_ISO" bs=1 count=432 of="$MBR_TEMPLATE"
+    dd if="./debian/$DEBIAN_ISO" bs=1 count=432 of="$MBR_TEMPLATE" status=none
 
-    # Create the new ISO image
+    echo "Building modified ISO..."
     xorriso -as mkisofs \
-       -r -V 'Debian modified iso' \
-       -o "$NEW_ISO" \
-       -J -J -joliet-long -cache-inodes \
-       -isohybrid-mbr "$MBR_TEMPLATE" \
-       -b isolinux/isolinux.bin \
-       -c isolinux/boot.cat \
-       -boot-load-size 4 -boot-info-table -no-emul-boot \
-       -eltorito-alt-boot \
-       -e boot/grub/efi.img \
-       -no-emul-boot -isohybrid-gpt-basdat -isohybrid-apm-hfsplus \
-       "$NEW_FILES"
+        -r \
+        -V 'Debian modified iso' \
+        -o "$NEW_ISO" \
+        -J \
+        -joliet-long \
+        -cache-inodes \
+        -isohybrid-mbr "$MBR_TEMPLATE" \
+        -b isolinux/isolinux.bin \
+        -c isolinux/boot.cat \
+        -boot-load-size 4 \
+        -boot-info-table \
+        -no-emul-boot \
+        -eltorito-alt-boot \
+        -e boot/grub/efi.img \
+        -no-emul-boot \
+        -isohybrid-gpt-basdat \
+        -isohybrid-apm-hfsplus \
+        "$NEW_FILES"
+
+    echo "Created ISO: $NEW_ISO"
 }
 
-# Main script logic
-case $1 in
+case "$1" in
     n|net)
-        HTTP_ISO_DIR="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd" 
+        HTTP_ISO_DIR="https://cdimage.debian.org/debian-cd/current/amd64/iso-cd"
         DOWNLOAD_ISO
-        DEBIAN_ISO=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-netinst.iso' -printf '%P\n' | sort -V -r | head -n1)
+        DEBIAN_ISO="$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-netinst.iso' -printf '%P\n' | sort -V -r | head -n1)"
         VERIFY_ISO
         BUILD_DEBIAN_ISO
         ;;
     f|full)
         HTTP_ISO_DIR="https://cdimage.debian.org/debian-cd/current/amd64/iso-dvd"
         DOWNLOAD_ISO
-        DEBIAN_ISO=$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-DVD-*.iso' -printf '%P\n' | sort -V -r | head -n1)
+        DEBIAN_ISO="$(find debian -maxdepth 1 -type f -name 'debian-*-amd64-DVD-*.iso' -printf '%P\n' | sort -V -r | head -n1)"
         VERIFY_ISO
         BUILD_DEBIAN_ISO
         ;;
     h|*)
-        USAGE 
+        USAGE
         ;;
 esac

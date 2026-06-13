@@ -1,0 +1,12 @@
+Package: debian-btrfs-iso-udeb
+Version: 0.1
+Section: debian-installer
+Priority: optional
+Architecture: all
+Package-Type: udeb
+Depends: partman-base, btrfs-progs-udeb
+Maintainer: Debian BTRFS ISO Maintainers <maintainer@example.invalid>
+Description: Btrfs subvolume setup hook for Debian Installer
+ This installer component adds a partman finish hook that converts the
+ installed Btrfs root into the project's subvolume layout and copies the
+ post-install Snapper helper scripts into the target system.

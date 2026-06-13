@@ -21,6 +21,15 @@ For a debian DVD full install, use:
 # Info:
 the build_debian command with build a debian ISO: debian-<version>-amd64-<DVD/netinst>-btrfs-modified.iso
 
+# Build the Debian Installer udeb
+To build only the installer component:
+
+`./build_udeb`
+
+This creates `dist/debian-btrfs-iso-udeb_<version>_all.udeb`. The udeb installs
+the BTRFS subvolume setup hook into `partman` and carries the post-install
+Snapper helper scripts inside the installer environment.
+
 # Make bootable USB and boot USB
 
 # QUICK GUIDE
@@ -57,4 +66,3 @@ Finally, if no errors:
 `sudo rm -rf /btrfs_conf`
 
 # FULL GUIDE COMING SOON
-

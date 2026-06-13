@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -e
+
+if ls /cdrom/udeb/debian-btrfs-iso-udeb_*.udeb >/dev/null 2>&1; then
+	for UDEB in /cdrom/udeb/debian-btrfs-iso-udeb_*.udeb; do
+		udpkg -i "$UDEB"
+	done
+elif [ -f /cdrom/scripts/build_btrfs_subvols ]; then
+	cp /cdrom/scripts/build_btrfs_subvols /usr/lib/partman/finish.d/99btrfs-subvols
+	chmod 755 /usr/lib/partman/finish.d/99btrfs-subvols
+else
+	echo "Cannot find Btrfs installer udeb or fallback script on /cdrom" >&2
+	exit 1
+fi
