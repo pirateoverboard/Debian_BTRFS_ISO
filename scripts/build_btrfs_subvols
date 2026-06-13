@@ -30,8 +30,10 @@ SETUP_ROOT_FILESYSTEM() {
 	# Rename root filesystem.
 	if [ -d /mnt/@rootfs ]; then
 		mv -v /mnt/@rootfs /mnt/@
+	elif [ ! -e /mnt/@ ]; then
+		btrfs subvolume create /mnt/@
 	else
-		echo "Error: file system not BTRFS. Please restart install."
+		echo "Btrfs root subvolume @ already exists; cannot safely convert again."
 		exit 2
 	fi
 
@@ -130,4 +132,4 @@ FINISH_INSTALL
 echo "btrfs subvolumes setup correctly"
 echo "script output and errors written to log.txt"
 echo "copied scripts to /home/btrfs_conf"
-echo "after first boot run: sudo ./install_snapper_grub-btrfs"
+echo "late_command will run the Snapper, grub-btrfs, and home setup scripts"

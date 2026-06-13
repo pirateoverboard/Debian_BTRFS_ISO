@@ -50,7 +50,7 @@ for SCRIPT in scripts/*; do
         scripts/preseed.cfg)
             install -m 0644 "$SCRIPT" "$PACKAGE_ROOT/usr/lib/debian-btrfs-iso/"
             ;;
-        *.py|*.sh|scripts/install_snapper_grub-btrfs|scripts/build_btrfs_subvols|scripts/install_btrfs_udeb)
+        *.sh|scripts/install_snapper_grub-btrfs|scripts/build_btrfs_subvols|scripts/install_btrfs_udeb|scripts/run_late_setup)
             install -m 0755 "$SCRIPT" "$PACKAGE_ROOT/usr/lib/debian-btrfs-iso/"
             ;;
         *)

@@ -33,36 +33,21 @@ Snapper helper scripts inside the installer environment.
 # Make bootable USB and boot USB
 
 # QUICK GUIDE
-After booting USB, choose Advanced, then Expert install
+After booting USB, choose Advanced, then Expert install.
 
-Configure everything until you get to partitioning
+Use the installer defaults until you get to partitioning.
 
-When you get to Partition, choose Manual
+When you get to Partition, choose Manual:
 - [ ] Configure EFI partition
 - [ ] Configure /boot partition
-- [ ] Configure Encypted Volumes
-- [ ] Change Encryped Volume from ext4 to btrfs
-- [ ] Change Encryped Volume mount point to /
+- [ ] Configure encrypted volume if wanted
+- [ ] Select the root filesystem entry, set it to BTRFS, then set Mount point to /
+- [ ] Do not create separate /home, /var, /opt, or /srv partitions
 - [ ] Commit changes
-- [ ] DON'T INSTALL BASE. Instead choose execute a shell
-- [ ] run `./cdrom/scripts/build_btrfs_subvols`
-- [ ] exit
 
-Install base and configure remaining options
+Continue the installer normally.
 
-### After first boot, run these commands:
-`cd /home`
-
-`sudo ./btrfs_conf/install_snapper_grub-btrfs`
-
-`./btrfs_conf/fix_home.sh`
-
-Optionally, to install btrfs-assistant
-
-`sudo ./btrfs_conf/extra_install_btrfs-assistant.sh`
-
-Finally, if no errors:
-
-`sudo rm -rf /btrfs_conf`
+The preseed late command runs the Snapper, grub-btrfs, and home subvolume setup
+before the installer finishes.
 
 # FULL GUIDE COMING SOON

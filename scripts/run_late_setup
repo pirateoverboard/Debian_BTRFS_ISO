@@ -1,0 +1,69 @@
+#!/bin/sh
+
+set -e
+
+LOGDIR="/target/var/log"
+mkdir -p "$LOGDIR"
+exec >"$LOGDIR/run_late_setup.log" 2>&1
+
+MOUNTED_DEV=0
+MOUNTED_PROC=0
+MOUNTED_SYS=0
+MOUNTED_RUN=0
+
+cleanup() {
+	if [ "$MOUNTED_RUN" -eq 1 ]; then
+		umount /target/run || true
+	fi
+	if [ "$MOUNTED_SYS" -eq 1 ]; then
+		umount /target/sys || true
+	fi
+	if [ "$MOUNTED_PROC" -eq 1 ]; then
+		umount /target/proc || true
+	fi
+	if [ "$MOUNTED_DEV" -eq 1 ]; then
+		umount -l /target/dev || true
+	fi
+}
+trap cleanup EXIT
+
+mkdir -p /target/dev
+mount --rbind /dev /target/dev
+MOUNTED_DEV=1
+
+mkdir -p /target/dev/disk/by-uuid
+if [ -f /target/etc/fstab ]; then
+	grep -Eo 'UUID=[^[:space:]]+' /target/etc/fstab |
+		sed 's/^UUID=//' |
+		while read -r UUID; do
+			[ -n "$UUID" ] || continue
+			DEVICE="$(blkid -U "$UUID" 2>/dev/null || true)"
+			if [ -n "$DEVICE" ] && [ ! -e "/target/dev/disk/by-uuid/$UUID" ]; then
+				ln -s "$DEVICE" "/target/dev/disk/by-uuid/$UUID"
+			fi
+		done
+fi
+
+if ! mountpoint -q /target/proc; then
+	mount -t proc proc /target/proc
+	MOUNTED_PROC=1
+fi
+
+if ! mountpoint -q /target/sys; then
+	mount -t sysfs sysfs /target/sys
+	MOUNTED_SYS=1
+fi
+
+if [ -d /run ] && ! mountpoint -q /target/run; then
+	mkdir -p /target/run
+	mount -o bind /run /target/run
+	MOUNTED_RUN=1
+fi
+
+chroot /target /bin/bash -c \
+	'/home/btrfs_conf/install_snapper_grub-btrfs >/var/log/install_snapper_grub-btrfs.log 2>&1'
+chroot /target /bin/bash -c \
+	'/home/btrfs_conf/fix_home.sh >/var/log/fix_home.log 2>&1'
+chroot /target /bin/bash -c \
+	'update-grub >/var/log/update-grub-final.log 2>&1'
+rm -rf /target/home/btrfs_conf

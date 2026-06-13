@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+trap 'echo "Error in install_snapper_grub-btrfs on line $LINENO" >&2' ERR
 
 # Check if script is run as root
 if [ "$(id -u)" -ne 0 ]; then
@@ -9,13 +10,14 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # Disable cdrom entry in sources.list
-if grep -qa "cdrom" /etc/apt/sources.list; then
+if [ -f /etc/apt/sources.list ] && grep -qa "cdrom" /etc/apt/sources.list; then
     sed -i '1 s/^/#/' /etc/apt/sources.list
 fi
 
 # Install required packages
+export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y zram-tools snapper inotify-tools git make gawk
+apt-get install -y btrfs-progs zram-tools snapper inotify-tools git make gawk
 
 # Configure zram
 sed -i 's/^#ALGO=lz4/ALGO=lz4/g' /etc/default/zramswap
@@ -38,7 +40,7 @@ for DIR in "${SNAPSHOT_SUBVOL[@]}"; do
 done
 
 # Create snapper configuration
-python3 /home/btrfs_conf/create_snapper_config.py
+/home/btrfs_conf/create_snapper_config.sh
 
 # Delete existing subvolumes and recreate directories
 for DIR in "${SNAPSHOT_SUBVOL[@]}"; do
@@ -49,21 +51,57 @@ done
 # Mount filesystems
 mount -av
 
-# Disable snapper-boot timer
-systemctl disable --now snapper-boot.timer
+# Disable snapper-boot timer without calling systemd in the installer chroot.
+rm -f /etc/systemd/system/timers.target.wants/snapper-boot.timer
 
 # Configure snapper
-python3 /home/btrfs_conf/setup_snapper_config.py
+/home/btrfs_conf/setup_snapper_config.sh
 
 # Clone and install grub-btrfs
+rm -rf /home/btrfs_conf/grub-btrfs
 git clone https://github.com/Antynea/grub-btrfs /home/btrfs_conf/grub-btrfs
-make install --directory /home/btrfs_conf/grub-btrfs
+mkdir -p /tmp
+chmod 1777 /tmp
+
+echo "Checking /tmp and /dev/disk/by-uuid before installing grub-btrfs"
+ls -ld /tmp
+ls -l /dev/disk/by-uuid || true
+
+if [ -f /etc/fstab ]; then
+    while read -r UUID; do
+        [ -n "$UUID" ] || continue
+        if [ ! -e "/dev/disk/by-uuid/$UUID" ]; then
+            echo "Error: /dev/disk/by-uuid/$UUID from /etc/fstab is missing"
+            exit 1
+        fi
+    done < <(grep -Eo 'UUID=[^[:space:]]+' /etc/fstab | sed 's/^UUID=//' | sort -u)
+fi
+
+make install --directory /home/btrfs_conf/grub-btrfs GRUB_UPDATE_EXCLUDE=true
+
+# Enable encrypted disk support in grub-btrfs before regenerating GRUB.
+GRUB_BTRFS_CONFIG="/etc/default/grub-btrfs/config"
+mkdir -p "$(dirname "$GRUB_BTRFS_CONFIG")"
+if grep -q '^#\?GRUB_BTRFS_ENABLE_CRYPTODISK=' "$GRUB_BTRFS_CONFIG"; then
+    sed -i 's|^#\?GRUB_BTRFS_ENABLE_CRYPTODISK=.*|GRUB_BTRFS_ENABLE_CRYPTODISK="true"|' "$GRUB_BTRFS_CONFIG"
+else
+    printf '%s\n' 'GRUB_BTRFS_ENABLE_CRYPTODISK="true"' >> "$GRUB_BTRFS_CONFIG"
+fi
+
+if ! grep -q '^GRUB_BTRFS_ENABLE_CRYPTODISK="true"$' "$GRUB_BTRFS_CONFIG"; then
+    echo "Error: GRUB_BTRFS_ENABLE_CRYPTODISK is not enabled in $GRUB_BTRFS_CONFIG"
+    exit 1
+fi
 
 # Update GRUB
 update-grub
 
-# Enable and start grub-btrfs daemon
-systemctl enable --now grub-btrfsd
-echo
-echo
-echo "Please run: ./fix_home.sh"
+# Enable grub-btrfs daemon without calling systemd in the installer chroot.
+mkdir -p /etc/systemd/system/multi-user.target.wants
+if [ -f /usr/lib/systemd/system/grub-btrfsd.service ]; then
+    ln -sf /usr/lib/systemd/system/grub-btrfsd.service \
+        /etc/systemd/system/multi-user.target.wants/grub-btrfsd.service
+elif [ -f /lib/systemd/system/grub-btrfsd.service ]; then
+    ln -sf /lib/systemd/system/grub-btrfsd.service \
+        /etc/systemd/system/multi-user.target.wants/grub-btrfsd.service
+fi
