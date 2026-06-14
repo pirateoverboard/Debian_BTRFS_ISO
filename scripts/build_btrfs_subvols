@@ -2,23 +2,68 @@
 
 set -e
 
-# Determine if efi is in use and capture drive name if used.
-if [ -d /sys/firmware/efi ]; then
-    EFI_DEVICE=$(df | awk '/\/target\/boot\/efi/{print $1;exit}')
-fi
-
-BOOT_DEVICE=$(df | awk '/\/target\/boot$/{print $1;exit}')
-VOL_GROUP=$(df | awk '/\/dev\/mapper/{print $1;exit}')
-GET_UUID=$(blkid | awk '/\/dev\/mapper/{print $2;exit}' | sed 's/"//g')
 FSTAB_MAX_LEN="34"
 SCRIPT_SOURCE="/cdrom/scripts"
+MOUNT_OPTIONS="noatime,space_cache=v2,compress=zstd:1,ssd,discard=async"
+BOOT_DEVICE=""
+EFI_DEVICE=""
+HAVE_BOOT=0
+HAVE_EFI=0
 
 if [ -d /usr/lib/debian-btrfs-iso ]; then
 	SCRIPT_SOURCE="/usr/lib/debian-btrfs-iso"
 fi
 
+fail() {
+	echo "Error: $*" >&2
+	exit 1
+}
+
+mount_source() {
+	awk -v mountpoint="$1" '$2 == mountpoint { print $1; found = 1 } END { exit found ? 0 : 1 }' /proc/mounts
+}
+
+mount_fstype() {
+	awk -v mountpoint="$1" '$2 == mountpoint { print $3; found = 1 } END { exit found ? 0 : 1 }' /proc/mounts
+}
+
+validate_mount_source() {
+	local_mountpoint="$1"
+	local_source="$2"
+
+	[ -n "$local_source" ] || fail "$local_mountpoint is not mounted"
+	[ -b "$local_source" ] || fail "$local_mountpoint source is not a block device: $local_source"
+}
+
+VALIDATE_INSTALLER_STATE() {
+	VOL_GROUP="$(mount_source /target || true)"
+	validate_mount_source /target "$VOL_GROUP"
+
+	ROOT_FSTYPE="$(mount_fstype /target || true)"
+	[ "$ROOT_FSTYPE" = "btrfs" ] || fail "/target must be mounted as btrfs, found: ${ROOT_FSTYPE:-unknown}"
+
+	ROOT_UUID="$(blkid -s UUID -o value "$VOL_GROUP" 2>/dev/null || true)"
+	[ -n "$ROOT_UUID" ] || fail "could not determine UUID for $VOL_GROUP"
+	GET_UUID="UUID=$ROOT_UUID"
+
+	if grep -qs '[[:space:]]/target/boot[[:space:]]' /proc/mounts; then
+		BOOT_DEVICE="$(mount_source /target/boot || true)"
+		validate_mount_source /target/boot "$BOOT_DEVICE"
+		HAVE_BOOT=1
+	fi
+
+	if [ -d /sys/firmware/efi ]; then
+		EFI_DEVICE="$(mount_source /target/boot/efi || true)"
+		validate_mount_source /target/boot/efi "$EFI_DEVICE"
+		HAVE_EFI=1
+	fi
+
+	[ -d "$SCRIPT_SOURCE" ] || fail "cannot find installer scripts at $SCRIPT_SOURCE"
+	[ -f "$SCRIPT_SOURCE/run_late_setup" ] || fail "cannot find run_late_setup in $SCRIPT_SOURCE"
+}
+
 SETUP_ROOT_FILESYSTEM() {
-	for DEVICE in /target/boot/efi /target/boot /target;do
+	for DEVICE in /target/boot/efi /target/boot /target; do
 		if grep -qs "${DEVICE}" /proc/mounts; then
 			umount -v "${DEVICE}"
 		fi
@@ -37,26 +82,23 @@ SETUP_ROOT_FILESYSTEM() {
 		exit 2
 	fi
 
-	MOUNT_OPTIONS="noatime,space_cache=v2,compress=zstd:1,ssd,discard=async"
 	mount -v -t btrfs -o "${MOUNT_OPTIONS},subvol=@" "${VOL_GROUP}" /target
-
 
 	sed -i '/@rootfs/d' /target/etc/fstab
 	printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
-			"${GET_UUID}" "/" "btrfs" \
-			"${MOUNT_OPTIONS},subvol=@" "0 0" \
-			>> /target/etc/fstab
+		"${GET_UUID}" "/" "btrfs" \
+		"${MOUNT_OPTIONS},subvol=@" "0 0" \
+		>> /target/etc/fstab
 }
 
 SETUP_SUBVOLUMES() {
 	# Create and configure subvolumes
-	while IFS= read -r BTRFS_DIRS
-	do
-	    BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed -r 's|/|@|g')
+	while IFS= read -r BTRFS_DIRS; do
+		BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed 's|/|@|g')
 		btrfs subvolume create "/mnt/@${BTRFS_SUBVOLS}"
 		mkdir -p -v "/target/${BTRFS_DIRS}"
 		mount -v -o "${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "${VOL_GROUP}" \
-					"/target/${BTRFS_DIRS}"
+			"/target/${BTRFS_DIRS}"
 		printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
 			"${GET_UUID}" "/${BTRFS_DIRS}" "btrfs" \
 			"${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "0 0" \
@@ -87,13 +129,12 @@ SETUP_SUBVOLUMES() {
 
 SETUP_SNAPSHOT_SUBVOLS() {
 	# .snapshot subvols need a mount point before they can be mounted
-	while IFS= read -r BTRFS_DIRS
-	do
-		BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed -r 's|/|@|g')
+	while IFS= read -r BTRFS_DIRS; do
+		BTRFS_SUBVOLS=$(echo "${BTRFS_DIRS}" | sed 's|/|@|g')
 		btrfs subvolume create "/mnt/@${BTRFS_SUBVOLS}"
 		mkdir -p -v "/target/${BTRFS_DIRS}"
 		mount -v -o "${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "${VOL_GROUP}" \
-					"/target/${BTRFS_DIRS}"
+			"/target/${BTRFS_DIRS}"
 		printf "%-41s %-${FSTAB_MAX_LEN}s %-5s %-s %-s\n" \
 			"${GET_UUID}" "/${BTRFS_DIRS}" "btrfs" \
 			"${MOUNT_OPTIONS},subvol=@${BTRFS_SUBVOLS}" "0 0" \
@@ -110,12 +151,14 @@ SETUP_SNAPSHOT_SUBVOLS() {
 	END
 }
 
-FINISH_INSTALL(){
+FINISH_INSTALL() {
 	# Mount boot
-	mount -v "${BOOT_DEVICE}" /target/boot
+	if [ "$HAVE_BOOT" -eq 1 ]; then
+		mount -v "${BOOT_DEVICE}" /target/boot
+	fi
 
 	# Mount efi if it exists
-	if [ -d /sys/firmware/efi ]; then
+	if [ "$HAVE_EFI" -eq 1 ]; then
 		mount -v "${EFI_DEVICE}" /target/boot/efi
 	fi
 
@@ -124,6 +167,7 @@ FINISH_INSTALL(){
 	umount -v /mnt
 }
 
+VALIDATE_INSTALLER_STATE
 SETUP_ROOT_FILESYSTEM
 SETUP_SUBVOLUMES
 SETUP_SNAPSHOT_SUBVOLS
